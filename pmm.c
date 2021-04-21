@@ -81,15 +81,27 @@ pde_t * const vpd = (pde_t *)PGADDR(PDX(VPT), PDX(VPT), 0);
 /* *
  * Global Descriptor Table:
  *
- * The kernel and user segments are identical (except for the DPL). To load
- * the %ss register, the CPL must equal the DPL. Thus, we must duplicate the
- * segments for the user and the kernel. Defined as follows:
+ * The kernel and user segments are identical (except for the DPL). 
+   To load the %ss register, the CPL must equal the DPL. 
+   Thus, we must duplicate the segments for the user and the kernel. 
+   Defined as follows:
  *   - 0x0 :  unused (always faults -- for trapping NULL far pointers)
  *   - 0x8 :  kernel code segment
  *   - 0x10:  kernel data segment
  *   - 0x18:  user code segment
  *   - 0x20:  user data segment
  *   - 0x28:  defined for tss, initialized in gdt_init
+ 全局描述符表：
+内核和用户段是相同的（除了DPL）。
+要加载%ss寄存器，CPL必须等于DPL(当前特权级必须等于所需要的特权级)。
+因此，我们必须为用户和内核复制段。
+定义如下：
+-0x0:未使用（总是false--用于捕获空远指针）
+-0x8：内核代码段
+-0x10：内核数据段
+-0x18：用户代码段
+-0x20：用户数据段
+-0x28:为tss定义，在gdt\u init中初始化
  * */
 static struct segdesc gdt[] = {
     SEG_NULL,
@@ -100,6 +112,7 @@ static struct segdesc gdt[] = {
     [SEG_TSS]   = SEG_NULL,
 };
 
+//伪描述符
 static struct pseudodesc gdt_pd = {
     sizeof(gdt) - 1, (uintptr_t)gdt
 };
@@ -109,8 +122,8 @@ static void check_pgdir(void);
 static void check_boot_pgdir(void);
 
 /* *
- * lgdt - load the global descriptor table register and reset the
- * data/code segement registers for kernel.
+ * lgdt - load the global descriptor table register and reset the data/code segement registers for kernel.
+   lgdt—加载全局描述符表寄存器并重置内核态的数据/代码段寄存器。
  * */
 static inline void
 lgdt(struct pseudodesc *pd) {
@@ -125,26 +138,30 @@ lgdt(struct pseudodesc *pd) {
 }
 
 /* *
- * load_esp0 - change the ESP0 in default task state segment,
- * so that we can use different kernel stack when we trap frame
- * user to kernel.
+ * load_esp0 - change the ESP0 in default task state segment, so that we can use different kernel stack when we trap frame user to kernel.
+   load_esp0-更改默认任务状态段中的esp0，以便在将帧用户捕获到内核时可以使用不同的内核堆栈。
  * */
 void
 load_esp0(uintptr_t esp0) {
     ts.ts_esp0 = esp0;
 }
 
-/* gdt_init - initialize the default GDT and TSS */
+/* gdt_init - initialize the default GDT and TSS 
+   gdt_init-初始化默认的gdt和TSS
+*/
 static void
 gdt_init(void) {
     // set boot kernel stack and default SS0
+    ////设置引导内核堆栈和默认SS0
     load_esp0((uintptr_t)bootstacktop);
     ts.ts_ss0 = KERNEL_DS;
 
     // initialize the TSS filed of the gdt
+    //初始化gdt的TSS文件
     gdt[SEG_TSS] = SEGTSS(STS_T32A, (uintptr_t)&ts, sizeof(ts), DPL_KERNEL);
 
     // reload all segment registers
+    //重新加载所有段寄存器
     lgdt(&gdt_pd);
 
     // load the TSS
@@ -152,6 +169,7 @@ gdt_init(void) {
 }
 
 //init_pmm_manager - initialize a pmm_manager instance
+//init_pmm_manager-初始化一个pmm_manager实例
 static void
 init_pmm_manager(void) {
     pmm_manager = &default_pmm_manager;
@@ -159,13 +177,15 @@ init_pmm_manager(void) {
     pmm_manager->init();
 }
 
-//init_memmap - call pmm->init_memmap to build Page struct for free memory  
+//init_memmap - call pmm->init_memmap to build Page struct for free memory
+//init_memmap - 调用pmm->init_memmap为空闲内存构建页结构  
 static void
 init_memmap(struct Page *base, size_t n) {
     pmm_manager->init_memmap(base, n);
 }
 
 //alloc_pages - call pmm->alloc_pages to allocate a continuous n*PAGESIZE memory 
+//alloc_pages - 调用pmm->alloc_pages来分配一个连续的n*PAGESIZE内存
 struct Page *
 alloc_pages(size_t n) {
     struct Page *page=NULL;
@@ -179,6 +199,7 @@ alloc_pages(size_t n) {
 }
 
 //free_pages - call pmm->free_pages to free a continuous n*PAGESIZE memory 
+//释放内存
 void
 free_pages(struct Page *base, size_t n) {
     bool intr_flag;
@@ -189,8 +210,8 @@ free_pages(struct Page *base, size_t n) {
     local_intr_restore(intr_flag);
 }
 
-//nr_free_pages - call pmm->nr_free_pages to get the size (nr*PAGESIZE) 
-//of current free memory
+//nr_free_pages - call pmm->nr_free_pages to get the size (nr*PAGESIZE) of current free memory
+//获取当前可用内存的大小（nr*PAGESIZE）
 size_t
 nr_free_pages(void) {
     size_t ret;
@@ -203,7 +224,9 @@ nr_free_pages(void) {
     return ret;
 }
 
-/* pmm_init - initialize the physical memory management */
+/* pmm_init - initialize the physical memory management 
+   初始化物理内存管理
+*/
 static void
 page_init(void) {
     struct e820map *memmap = (struct e820map *)(0x8000 + KERNBASE);
@@ -257,11 +280,18 @@ page_init(void) {
 }
 
 //boot_map_segment - setup&enable the paging mechanism
-// parameters
+// parameters参数
 //  la:   linear address of this memory need to map (after x86 segment map)
 //  size: memory size
 //  pa:   physical address of this memory
 //  perm: permission of this memory  
+
+//boot_map_segment-设置并启用分页机制
+//la：需要映射的这个内存的线性地址（在x86段映射之后）
+//size：内存大小
+//pa：内存的物理地址
+//perm：内存的权限
+
 static void
 boot_map_segment(pde_t *pgdir, uintptr_t la, size_t size, uintptr_t pa, uint32_t perm) {
     assert(PGOFF(la) == PGOFF(pa));
@@ -275,23 +305,26 @@ boot_map_segment(pde_t *pgdir, uintptr_t la, size_t size, uintptr_t pa, uint32_t
     }
 }
 
-//boot_alloc_page - allocate one page using pmm->alloc_pages(1) 
-// return value: the kernel virtual address of this allocated page
-//note: this function is used to get the memory for PDT(Page Directory Table)&PT(Page Table)
+
+//boot_alloc_page-使用pmm->alloc_pages(1)分配一个页面
+//返回值：此分配页的内核虚拟地址
+//注意：此函数用于获取PDT（页目录表）和PT（页表）的内存
 static void *
 boot_alloc_page(void) {
     struct Page *p = alloc_page();
     if (p == NULL) {
         panic("boot_alloc_page failed.\n");
     }
-    return page2kva(p);
+    return page2kva(p);//page to kernel virtual address
 }
 
-//pmm_init - setup a pmm to manage physical memory, build PDT&PT to setup paging mechanism 
-//         - check the correctness of pmm & paging mechanism, print PDT&PT
+
+
+//pmm_init-设置pmm来管理物理内存，构建PDT&PT来设置分页机制
+//	  -检查pmm和页机制的正确性，打印PDT和PT 
 void
 pmm_init(void) {
-    // We've already enabled paging
+    //我们已经启用了分页
     boot_cr3 = PADDR(boot_pgdir);
 
     //We need to alloc/free the physical memory (granularity is 4KB or other size). 
@@ -299,70 +332,80 @@ pmm_init(void) {
     //First we should init a physical memory manager(pmm) based on the framework.
     //Then pmm can alloc/free the physical memory. 
     //Now the first_fit/best_fit/worst_fit/buddy_system pmm are available.
+//我们需要分配/释放物理内存（粒度为4KB或其他大小）。
+//因此，在pmm.h中定义了一个物理内存管理器框架（struct pmm_manager）
+//首先，我们应该基于这个框架初始化一个物理内存管理器（pmm）。
+//然后pmm可以分配/释放物理内存。
+//现在提供了first_fit/best_fit/worst_fit/buddy_system pmm。
     init_pmm_manager();
 
-    // detect physical memory space, reserve already used memory,
-    // then use pmm->init_memmap to create free page list
+    //检测物理内存空间，保留已用内存，
+    //然后使用pmm->init_memmap创建释放页面列表
     page_init();
 
-    //use pmm->check to verify the correctness of the alloc/free function in a pmm
+    //使用pmm->check验证pmm中alloc/free函数的正确性
     check_alloc_page();
 
     check_pgdir();
 
     static_assert(KERNBASE % PTSIZE == 0 && KERNTOP % PTSIZE == 0);
 
-    // recursively insert boot_pgdir in itself
-    // to form a virtual page table at virtual address VPT
+
+    //在自身中递归插入boot_pgdir,以在虚拟地址VPT处形成虚拟页表 
     boot_pgdir[PDX(VPT)] = PADDR(boot_pgdir) | PTE_P | PTE_W;
 
-    // map all physical memory to linear memory with base linear addr KERNBASE
+
+    //使用线性基地址 KERNBASE将所有物理内存映射到线性内存
     // linear_addr KERNBASE ~ KERNBASE + KMEMSIZE = phy_addr 0 ~ KMEMSIZE
     boot_map_segment(boot_pgdir, KERNBASE, KMEMSIZE, 0, PTE_W);
+
 
     // Since we are using bootloader's GDT,
     // we should reload gdt (second time, the last time) to get user segments and the TSS
     // map virtual_addr 0 ~ 4G = linear_addr 0 ~ 4G
     // then set kernel stack (ss:esp) in TSS, setup TSS in gdt, load TSS
+    //因为我们使用的是引导加载程序的GDT，
+    //我们应该重新加载gdt（第二次，最后一次）以获得用户段和TSS映射virtual_addr 0~4G= linear_addr 0~4G，
+    //然后在TSS中设置内核态堆栈（ss:esp），在gdt中设置TSS，加载TSS
     gdt_init();
 
     //now the basic virtual memory map(see memalyout.h) is established.
     //check the correctness of the basic virtual memory map.
+    //现在基本的虚拟内存映射（参见memalyout.h）已经建立。
+    //检查基本虚拟内存映射的正确性。 
     check_boot_pgdir();
 
     print_pgdir();
 
 }
 
-//get_pte - get pte and return the kernel virtual address of this pte for la
-//        - if the PT contians this pte didn't exist, alloc a page for PT
-// parameter:
-//  pgdir:  the kernel virtual base address of PDT
-//  la:     the linear address need to map
-//  create: a logical value to decide if alloc a page for PT
-// return vaule: the kernel virtual address of this pte
+
+
+//get_pte-get pte并为la返回此pte的内核虚拟地址
+//-如果PT包含不存在的pte，请为PT分配一个页面
+//参数：
+//pgdir：PDT的内核虚拟基址
+//la:需要映射的线性地址
+//create：一个逻辑值，用于决定是否为PT分配一个页面
+//return vaule：这个pte的内核虚拟地址 
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     /* LAB2 EXERCISE 2: YOUR CODE
      *
-     * If you need to visit a physical address, please use KADDR()
-     * please read pmm.h for useful macros
-     *
-     * Maybe you want help comment, BELOW comments can help you finish the code
-     *
-     * Some Useful MACROs and DEFINEs, you can use them in below implementation.
+     * 如果你需要访问一个物理地址, 用 KADDR()
+     * 有关一些宏，请阅读pmm.h
+     *一些有用的宏和定义，您可以在下面的实现中使用它们。
      * MACROs or Functions:
-     *   PDX(la) = the index of page directory entry of VIRTUAL ADDRESS la.
-     *   KADDR(pa) : takes a physical address and returns the corresponding kernel virtual address.
-     *   set_page_ref(page,1) : means the page be referenced by one time
-     *   page2pa(page): get the physical address of memory which this (struct Page *) page  manages
-     *   struct Page * alloc_page() : allocation a page
-     *   memset(void *s, char c, size_t n) : sets the first n bytes of the memory area pointed by s
-     *                                       to the specified value c.
+     *   PDX(la) = 虚拟地址la的页目录项索引。
+     *   KADDR(pa) : 获取物理地址并返回相应的内核虚拟地址。
+     *   set_page_ref(page,1) : 表示该页被一次引用
+     *   page2pa(page): 获取此（struct Page*）页 管理的内存的物理地址
+     *   struct Page * alloc_page() : 页分配
+     *   memset(void *s, char c, size_t n) : 将s指向的内存区域的前n个字节设置为指定值c。
      * DEFINEs:
-     *   PTE_P           0x001                   // page table/directory entry flags bit : Present
-     *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
-     *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
+     *   PTE_P           0x001                   // 页表/目录项标志位 : 存在Present
+     *   PTE_W           0x002                   // 页表/目录项标志位 : 可写的
+     *   PTE_U           0x004                   // 页表/目录项标志位 : 用户可以访问
      */
 #if 0
     pde_t *pdep = NULL;   // (1) find page directory entry
@@ -395,7 +438,7 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];//返回页表地址
 }
 
-//get_page - get related Page struct for linear address la using PDT pgdir
+//get_page - 使用PDT pgdir获取线性地址la的相关页结构
 struct Page *
 get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
     pte_t *ptep = get_pte(pgdir, la, 0);
@@ -408,9 +451,8 @@ get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
     return NULL;
 }
 
-//page_remove_pte - free an Page sturct which is related linear address la
-//                - and clean(invalidate) pte which is related linear address la
-//note: PT is changed, so the TLB need to be invalidate 
+//page_remove_pte - 释放一个与线性地址la相关的页结构并清除和线性地址相关的PTE
+//注：PT已更改，因此TLB需要失效
 static inline void
 page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
     /* LAB2 EXERCISE 3: YOUR CODE
@@ -449,6 +491,7 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
 }
 
 //page_remove - free an Page which is related linear address la and has an validated pte
+//释放一个与线性地址la相关并具有已验证的pte的页
 void
 page_remove(pde_t *pgdir, uintptr_t la) {
     pte_t *ptep = get_pte(pgdir, la, 0);
@@ -457,14 +500,14 @@ page_remove(pde_t *pgdir, uintptr_t la) {
     }
 }
 
-//page_insert - build the map of phy addr of an Page with the linear addr la
+//page_insert - 用线性地址la构建页的物理地址映射
 // paramemters:
-//  pgdir: the kernel virtual base address of PDT
-//  page:  the Page which need to map
-//  la:    the linear address need to map
-//  perm:  the permission of this Page which is setted in related pte
-// return value: always 0
-//note: PT is changed, so the TLB need to be invalidate 
+//pgdir：PDT的内核虚拟基址
+//page：需要映射的页
+//la:线性地址需要映射
+//perm：在相关pte中设置的该页的权限
+//返回值：始终为0
+//注：PT已更改，因此TLB需要失效
 int
 page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     pte_t *ptep = get_pte(pgdir, la, 1);
@@ -486,8 +529,8 @@ page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm) {
     return 0;
 }
 
-// invalidate a TLB entry, but only if the page tables being
-// edited are the ones currently in use by the processor.
+
+//仅当正在编辑的页表是 处理器当前正在使用的页表时，使TLB条目无效。
 void
 tlb_invalidate(pde_t *pgdir, uintptr_t la) {
     if (rcr3() == PADDR(pgdir)) {
@@ -594,17 +637,19 @@ perm2str(int perm) {
     return str;
 }
 
-//get_pgtable_items - In [left, right] range of PDT or PT, find a continuous linear addr space
+//get_pgtable_items - 在PDT或PT的[left，right]范围内，找到一个连续的线性地址空间
 //                  - (left_store*X_SIZE~right_store*X_SIZE) for PDT or PT
-//                  - X_SIZE=PTSIZE=4M, if PDT; X_SIZE=PGSIZE=4K, if PT
+//                  - X_SIZE=PTSIZE=4M, if PDT; 
+//		     - X_SIZE=PGSIZE=4K, if PT
 // paramemters:
-//  left:        no use ???
-//  right:       the high side of table's range
-//  start:       the low side of table's range
-//  table:       the beginning addr of table
-//  left_store:  the pointer of the high side of table's next range
-//  right_store: the pointer of the low side of table's next range
-// return value: 0 - not a invalid item range, perm - a valid item range with perm permission 
+//left：没用？？？
+//right：表范围的高端
+//start：表范围的低端
+//table：表的起始地址
+//left_store：表的下一个范围的高端指针
+//right_store：表的下一个范围的低端的指针
+//返回值：0-不是无效项的范围，
+//       perm-具有perm权限的有效项范围
 static int
 get_pgtable_items(size_t left, size_t right, size_t start, uintptr_t *table, size_t *left_store, size_t *right_store) {
     if (start >= right) {
