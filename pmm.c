@@ -11,52 +11,69 @@
 
 /* *
  * Task State Segment:
- *
- * The TSS may reside anywhere in memory. A special segment register called
- * the Task Register (TR) holds a segment selector that points a valid TSS
- * segment descriptor which resides in the GDT. Therefore, to use a TSS
+ *任务状态段：
+   任务状态段可以在内存的任何位置出现。
+   称为 任务寄存器（TR）的特殊段寄存器 包含 指向有效 任务状态段（TSS）的 段选择器
+   该段选择器指向 驻留在GDT中的 有效TSS段描述符
+   因此，使用TSS必须在函数gdt_init()中执行以下操作：
+     1）在GDT中创建TSS描述符条目
+     2）根据需要向内存中的TSS添加足够的信息
+     3）用该段的段选择器加载TR寄存器
+   TSS中有几个文件用于 在发生权限级别更改时 指定新的堆栈指针。
+   但是在我们的操作系统内核中只有SS0和ESP0字段是有用的。
+   字段SS0包含CPL=0的堆栈段选择器，字段ESP0包含CPL=0的新ESP值。
+   在保护模式下发生中断时，x86 CPU将在TSS中查找SS0和ESP0，并将其值分别加载到SS和ESP中。
+ * The TSS may reside anywhere in memory.
+ * A special segment register called the Task Register (TR) holds a segment selector that points a valid TSS
+ * segment descriptor which resides in the GDT. 
+ * Therefore, to use a TSS 
  * the following must be done in function gdt_init:
  *   - create a TSS descriptor entry in GDT
  *   - add enough information to the TSS in memory as needed
  *   - load the TR register with a segment selector for that segment
  *
- * There are several fileds in TSS for specifying the new stack pointer when a
- * privilege level change happens. But only the fields SS0 and ESP0 are useful
- * in our os kernel.
- *
- * The field SS0 contains the stack segment selector for CPL = 0, and the ESP0
- * contains the new ESP value for CPL = 0. When an interrupt happens in protected
- * mode, the x86 CPU will look in the TSS for SS0 and ESP0 and load their value
- * into SS and ESP respectively.
+ * There are several fileds in TSS for specifying the new stack pointer when a privilege level change happens. 
+ * But only the fields SS0 and ESP0 are useful in our os kernel.
+ * The field SS0 contains the stack segment selector for CPL = 0, 
+ * and the ESP0 contains the new ESP value for CPL = 0. 
+ * When an interrupt happens in protected mode, the x86 CPU will look in the TSS for SS0 and ESP0 and load their value into SS and ESP respectively.
  * */
 static struct taskstate ts = {0};
 
-// virtual address of physicall page array
+//物理调用页数组的虚拟地址
 struct Page *pages;
-// amount of physical memory (in pages)
+
+//物理内存的数量（页）
 size_t npage = 0;
 
-// virtual address of boot-time page directory
+//启动时页目录的虚拟地址
 extern pde_t __boot_pgdir;
 pde_t *boot_pgdir = &__boot_pgdir;
-// physical address of boot-time page directory
+
+//启动时页目录的物理地址
+//在X86系统中，页目录表的起始物理地址存放在cr3 寄存器中， 这个地址必须是一个页对齐的地址，也就是低 12 位必须为0。
 uintptr_t boot_cr3;
 
-// physical memory management
+//物理内存管理 
 const struct pmm_manager *pmm_manager;
 
 /* *
- * The page directory entry corresponding to the virtual address range
- * [VPT, VPT + PTSIZE) points to the page directory itself. Thus, the page
- * directory is treated as a page table as well as a page directory.
+ * The page directory entry corresponding to the virtual address range [VPT, VPT + PTSIZE) points to the page directory itself. 
+ Thus, the page directory is treated as a page table as well as a page directory.
  *
- * One result of treating the page directory as a page table is that all PTEs
- * can be accessed though a "virtual page table" at virtual address VPT. And the
- * PTE for number n is stored in vpt[n].
+ * One result of treating the page directory as a page table is that all PTEs can be accessed though a "virtual page table" at virtual address VPT. 
+ And the PTE for number n is stored in vpt[n].
  *
- * A second consequence is that the contents of the current page directory will
- * always available at virtual address PGADDR(PDX(VPT), PDX(VPT), 0), to which
- * vpd is set bellow.
+ * A second consequence is that the contents of the current page directory will always available at virtual address PGADDR(PDX(VPT), PDX(VPT), 0), to which vpd is set bellow.
+  
+  PTE(Page Table Entry)页表
+  PDE(Page Directory Entry)页目录表
+  与虚拟地址范围[VPT，VPT+PTSIZE）对应的页目录条目指向页目录本身。
+  因此，页目录被视为页表和页目录。
+  将页目录视为页表的一个结果是，可以通过虚拟地址VPT处的“虚拟页表”访问所有pte。
+  数字n的PTE存储在vpt[n]中。
+  第二个结果是当前页目录的内容将始终在虚拟地址PGADDR（PDX（VPT），PDX（VPT），0）处可用，vpd设置如下。
+ 
  * */
 pte_t * const vpt = (pte_t *)VPT;
 pde_t * const vpd = (pde_t *)PGADDR(PDX(VPT), PDX(VPT), 0);
@@ -359,29 +376,24 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     }
     return NULL;          // (8) return page table entry
 #endif
-
-    // 获取传入的线性地址中所对应的页目录条目的物理地址
-    pde_t *pdep = &pgdir[PDX(la)];
-    // 如果该条目不可用(not present)
+//尝试获取页表，注：typedef uintptr_t pte_t;
+//PDX:页目录索引 Page Directory Index
+//la:线性地址 Linear Address
+//PTX:页表索引 Page Table Index
+    pde_t *pdep = &pgdir[PDX(la)]; // (1) find page directory entry
+    //若获取不成功则执行下面的语句
     if (!(*pdep & PTE_P)) {
-        struct Page *page;
-        // 如果分配页面失败，或者不允许分配，则返回NULL
-        if (!create || (page = alloc_page()) == NULL)
+        struct Page *page;//申请一页
+        if (!create || (page = alloc_page()) == NULL) {
             return NULL;
-        // 设置该物理页面的引用次数为1
-        set_page_ref(page, 1);
-        // 获取当前物理页面所管理的物理地址
-        uintptr_t pa = page2pa(page);
-        // 清空该物理页面的数据。需要注意的是使用虚拟地址
+        }
+        set_page_ref(page, 1);//引用次数需要加1
+        uintptr_t pa = page2pa(page);//获取页的线性地址
         memset(KADDR(pa), 0, PGSIZE);
-        // 将新分配的页面设置为当前缺失的页目录条目中
-        // 之后该页面就是其中的一个二级页面
-        *pdep = pa | PTE_U | PTE_W | PTE_P;
+        *pdep = pa | PTE_U | PTE_W | PTE_P;//设置权限
     }
-    // 返回在pgdir中对应于la的二级页表项
-    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];//返回页表地址
 }
-
 
 //get_page - get related Page struct for linear address la using PDT pgdir
 struct Page *
